@@ -2,7 +2,6 @@ import { request } from './request';
 import type {
   CreateInterviewRequest,
   CurrentQuestionResponse,
-  InterviewReport,
   InterviewSession,
   SubmitAnswerRequest,
   SubmitAnswerResponse
@@ -17,6 +16,8 @@ export interface TextSessionMeta {
   status: string;
   evaluateStatus: string | null;
   evaluateError: string | null;
+  /** 评估降级：报告中有题目未拿到真实评分（模型失败后零分兜底） */
+  degraded: boolean;
   overallScore: number | null;
   sourceType: string | null;
   knowledgeBaseId: number | null;
@@ -67,15 +68,6 @@ export const interviewApi = {
         timeout: 180000, // 3分钟超时
       }
     );
-  },
-
-  /**
-   * 获取面试报告
-   */
-  async getReport(sessionId: string): Promise<InterviewReport> {
-    return request.get<InterviewReport>(`/api/interview/sessions/${sessionId}/report`, {
-      timeout: 180000, // 3分钟超时，AI评估需要时间
-    });
   },
 
   /**

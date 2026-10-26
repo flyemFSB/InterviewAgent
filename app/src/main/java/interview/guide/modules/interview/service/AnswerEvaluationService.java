@@ -45,6 +45,15 @@ public class AnswerEvaluationService {
      */
     public InterviewReportDTO evaluateInterview(ChatClient chatClient, String sessionId, String resumeText,
                                                  List<InterviewQuestionDTO> questions) {
+        return evaluateInterview(chatClient, sessionId, resumeText, questions, null);
+    }
+
+    /**
+     * @param progressHeartbeat 每完成一个评估批次回调，供调用方刷新任务租约（可为 null）
+     */
+    public InterviewReportDTO evaluateInterview(ChatClient chatClient, String sessionId, String resumeText,
+                                                 List<InterviewQuestionDTO> questions,
+                                                 Runnable progressHeartbeat) {
         log.info("开始评估面试: {}, 共{}题", sessionId, questions.size());
 
         try {
@@ -65,7 +74,7 @@ public class AnswerEvaluationService {
 
             // 调用通用评估服务
             EvaluationReport report = unifiedEvaluationService.evaluate(
-                chatClient, sessionId, qaRecords, resumeText, referenceContext
+                chatClient, sessionId, qaRecords, resumeText, referenceContext, progressHeartbeat
             );
 
             // 转为文字面试专用 DTO
@@ -98,7 +107,8 @@ public class AnswerEvaluationService {
             report.referenceAnswers().stream()
                 .map(ra -> new ReferenceAnswer(ra.questionIndex(), ra.question(),
                     ra.referenceAnswer(), ra.keyPoints()))
-                .toList()
+                .toList(),
+            report.degraded()
         );
     }
 
@@ -131,7 +141,8 @@ public class AnswerEvaluationService {
             report.overallFeedback(),
             report.strengths(),
             report.improvements(),
-            references
+            references,
+            report.degraded()
         );
     }
 

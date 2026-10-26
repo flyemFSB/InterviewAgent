@@ -55,14 +55,15 @@ class AnswerEvaluationServiceTest {
         "来源片段"
     );
     when(unifiedEvaluationService.evaluate(
-        nullable(ChatClient.class), eq("session1"), any(), eq("简历"), any()
+        nullable(ChatClient.class), eq("session1"), any(), eq("简历"), any(), nullable(Runnable.class)
     )).thenReturn(report());
 
     InterviewReportDTO actual = service.evaluateInterview(null, "session1", "简历", List.of(question));
 
     ArgumentCaptor<String> referenceCaptor = ArgumentCaptor.forClass(String.class);
     verify(unifiedEvaluationService).evaluate(
-        nullable(ChatClient.class), eq("session1"), any(), eq("简历"), referenceCaptor.capture()
+        nullable(ChatClient.class), eq("session1"), any(), eq("简历"), referenceCaptor.capture(),
+        nullable(Runnable.class)
     );
     verify(skillService, never()).buildEvaluationReferenceSectionSafe(any());
     verify(persistenceService, never()).findBySessionId(any());
@@ -96,7 +97,8 @@ class AnswerEvaluationServiceTest {
             "什么是索引下推？",
             "模型参考",
             List.of("模型要点")
-        ))
+        )),
+        false
     );
   }
 }

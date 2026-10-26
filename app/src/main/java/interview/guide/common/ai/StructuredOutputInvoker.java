@@ -85,6 +85,15 @@ public class StructuredOutputInvoker {
                 recordInvocation(contextTag, STATUS_SUCCESS, startNanos);
                 return result;
             } catch (Exception e) {
+                // 只重试解析/校验失败：传输错误、鉴权、上游 5xx 再试一次只是把同一次失败打两遍
+                if (isTransportFailure(e)) {
+                    recordAttempt(contextTag, STATUS_FAILURE);
+                    recordInvocation(contextTag, STATUS_FAILURE, startNanos);
+                    log.error("{}LLM 调用失败（传输/上游），不做解析重试: attempt={}/{}, error={}",
+                        logContext, attempt, maxAttempts, ErrorLogSanitizer.summarize(e),
+                        ErrorLogSanitizer.forLogging(e));
+                    throw new BusinessException(errorCode, errorPrefix + "请稍后重试");
+                }
                 lastError = e;
                 recordAttempt(contextTag, STATUS_FAILURE);
                 if (attempt < maxAttempts) {
@@ -226,6 +235,29 @@ public class StructuredOutputInvoker {
             return oneLine.substring(0, errorMessageMaxLength) + "...";
         }
         return oneLine;
+    }
+
+    /**
+     * 判断异常是否来自传输层/上游，而不是模型输出解析。
+     *
+     * <p>用类名判断而不用具体类型：Spring AI 的 AI 异常层次在 2.0 发生了搬家，
+     * 这里只依赖包前缀，不引入对方内部类。
+     */
+    private static boolean isTransportFailure(Throwable error) {
+        for (Throwable current = error; current != null; current = current.getCause()) {
+            String typeName = current.getClass().getName();
+            if (typeName.startsWith("org.springframework.ai.retry.")
+                || typeName.startsWith("org.springframework.web.client.")
+                || typeName.startsWith("com.openai.errors.")
+                || typeName.startsWith("java.net.")
+                || current instanceof java.io.IOException) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return false;
     }
 
     private void recordAttempt(String contextTag, String status) {

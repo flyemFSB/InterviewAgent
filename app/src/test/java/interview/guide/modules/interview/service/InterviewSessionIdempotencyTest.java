@@ -1,6 +1,5 @@
 package interview.guide.modules.interview.service;
 
-import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.infrastructure.redis.InterviewSessionCache;
 import interview.guide.infrastructure.redis.InterviewSessionCache.CachedSession;
 import interview.guide.infrastructure.redis.RedisService;
@@ -37,15 +36,11 @@ class InterviewSessionIdempotencyTest {
   @Mock
   private InterviewQuestionService questionService;
   @Mock
-  private AnswerEvaluationService evaluationService;
-  @Mock
   private InterviewPersistenceService persistenceService;
   @Mock
   private InterviewSessionCache sessionCache;
   @Mock
   private EvaluateStreamProducer evaluateStreamProducer;
-  @Mock
-  private LlmProviderRegistry llmProviderRegistry;
   @Mock
   private RedisService redisService;
 
@@ -57,12 +52,10 @@ class InterviewSessionIdempotencyTest {
     objectMapper = new ObjectMapper();
     service = new InterviewSessionService(
         questionService,
-        evaluationService,
         persistenceService,
         sessionCache,
         objectMapper,
         evaluateStreamProducer,
-        llmProviderRegistry,
         redisService
     );
     when(redisService.executeWithLock(anyString(), anyLong(), any(), any()))

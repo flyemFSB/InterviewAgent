@@ -19,9 +19,13 @@ import org.springframework.stereotype.Component;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 面试评估 Stream 消费者
@@ -36,6 +40,13 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     private final InterviewPersistenceService persistenceService;
     private final ObjectMapper objectMapper;
     private final LlmProviderRegistry llmProviderRegistry;
+
+    /** 租约与心跳的时长统一定义在 AsyncTaskStreamConstants，避免与恢复调度阈值脱节 */
+    private static final Duration LEASE_TIMEOUT =
+        Duration.ofMillis(AsyncTaskStreamConstants.INTERVIEW_EVALUATE_LEASE_TIMEOUT_MS);
+
+    private static final Duration HEARTBEAT_THROTTLE =
+        Duration.ofMillis(AsyncTaskStreamConstants.INTERVIEW_EVALUATE_HEARTBEAT_THROTTLE_MS);
 
     public EvaluateStreamConsumer(
         RedisService redisService,
@@ -53,7 +64,30 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         this.llmProviderRegistry = llmProviderRegistry;
     }
 
-    record EvaluatePayload(String sessionId) {}
+    /**
+     * 消息载荷。attemptId 在领取时写入，心跳与终态写入靠它做 fencing。
+     * 不用 record：领取（tryMarkProcessing）与执行（processBusiness）是两个回调，需要可变字段传递。
+     */
+    static final class EvaluatePayload {
+        private final String sessionId;
+        private String attemptId;
+
+        EvaluatePayload(String sessionId) {
+            this.sessionId = sessionId;
+        }
+
+        String sessionId() {
+            return sessionId;
+        }
+
+        String attemptId() {
+            return attemptId;
+        }
+
+        void attemptId(String attemptId) {
+            this.attemptId = attemptId;
+        }
+    }
 
     @Override
     protected String taskDisplayName() {
@@ -108,15 +142,24 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
     }
 
     /**
-     * 条件领取：只有 PENDING → PROCESSING 成功的消费者才执行评估。
+     * 租约式领取：PENDING 直接领，PROCESSING 但心跳超时则接管。
      *
-     * <p>消息在执行超过 PENDING_IDLE_TIMEOUT 后会被其它实例 XAUTOCLAIM 抢走，
-     * 无条件写状态会让两个实例同时评估同一会话（重复 LLM 计费）并互相覆盖结果。
+     * <p>租约阈值（{@link #LEASE_TIMEOUT}）必须小于 XAUTOCLAIM 的 pending idle 阈值：
+     * 消费者死掉后，消息被重投时租约已经过期，重投那边才能接管；
+     * 活着的任务靠 {@link #heartbeat} 续约，所以重投会因租约未过期而放弃执行。
      */
     @Override
     protected boolean tryMarkProcessing(EvaluatePayload payload) {
-        return sessionRepository.tryClaimEvaluation(
-            payload.sessionId(), AsyncTaskStatus.PENDING, AsyncTaskStatus.PROCESSING) == 1;
+        String attemptId = UUID.randomUUID().toString();
+        int claimed = sessionRepository.tryClaimEvaluation(
+            payload.sessionId(), attemptId,
+            AsyncTaskStatus.PENDING, AsyncTaskStatus.PROCESSING,
+            LocalDateTime.now().minus(LEASE_TIMEOUT), LocalDateTime.now());
+        if (claimed != 1) {
+            return false;
+        }
+        payload.attemptId(attemptId);
+        return true;
     }
 
     @Override
@@ -148,23 +191,72 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
         ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(provider);
 
         String resumeText = session.getResume() != null ? session.getResume().getResumeText() : "";
-        InterviewReportDTO report = evaluationService.evaluateInterview(chatClient, sessionId, resumeText, questions);
+        InterviewReportDTO report = evaluationService.evaluateInterview(
+            chatClient, sessionId, resumeText, questions, heartbeat(payload));
         persistenceService.saveReport(sessionId, report);
+        if (report.degraded()) {
+            log.warn("评估结果含降级题目（模型未给出评分）: sessionId={}", sessionId);
+        }
+    }
+
+    /**
+     * 租约续期：按批次节流，只推进仍由本次执行持有的行。
+     * 返回 0 说明租约已被其它实例接管，本次结果不再具备写入资格。
+     */
+    private Runnable heartbeat(EvaluatePayload payload) {
+        AtomicLong lastBeatNanos = new AtomicLong(System.nanoTime());
+        return () -> {
+            long now = System.nanoTime();
+            if (now - lastBeatNanos.get() < HEARTBEAT_THROTTLE.toNanos()) {
+                return;
+            }
+            lastBeatNanos.set(now);
+            int updated = sessionRepository.heartbeatEvaluation(
+                payload.sessionId(), payload.attemptId(),
+                AsyncTaskStatus.PROCESSING, LocalDateTime.now());
+            if (updated != 1) {
+                log.warn("评估租约已被接管，续期失败: sessionId={}, attemptId={}",
+                    payload.sessionId(), payload.attemptId());
+            }
+        };
     }
 
     @Override
     protected void markCompleted(EvaluatePayload payload) {
-        updateEvaluateStatus(payload.sessionId(), AsyncTaskStatus.COMPLETED, null);
+        int updated = sessionRepository.completeEvaluationIfProcessing(
+            payload.sessionId(), payload.attemptId(),
+            AsyncTaskStatus.PROCESSING, AsyncTaskStatus.COMPLETED, LocalDateTime.now());
+        if (updated != 1) {
+            log.warn("评估完成写入被条件拦住（租约已易主）: sessionId={}, attemptId={}",
+                payload.sessionId(), payload.attemptId());
+        }
     }
 
     @Override
     protected void markFailed(EvaluatePayload payload, String error) {
-        updateEvaluateStatus(payload.sessionId(), AsyncTaskStatus.FAILED, error);
+        int updated = sessionRepository.failEvaluationIfProcessing(
+            payload.sessionId(), payload.attemptId(),
+            AsyncTaskStatus.PROCESSING, AsyncTaskStatus.FAILED,
+            truncateError(error), LocalDateTime.now());
+        if (updated != 1) {
+            log.warn("评估失败写入被条件拦住（租约已易主）: sessionId={}, attemptId={}",
+                payload.sessionId(), payload.attemptId());
+        }
     }
 
     @Override
     protected void retryMessage(EvaluatePayload payload, int retryCount) {
         String sessionId = payload.sessionId();
+        // 条件重置是重试能生效的前提：领取过的行是 PROCESSING，
+        // 不重置回 PENDING 时下次领取必然失败，消息会被 ACK 丢弃。
+        int reset = sessionRepository.resetEvaluationToPending(
+            sessionId, payload.attemptId(), AsyncTaskStatus.PROCESSING,
+            AsyncTaskStatus.PENDING, LocalDateTime.now());
+        if (reset != 1) {
+            log.warn("重试重置失败（任务已完成或被接管），ACK 丢弃: sessionId={}, retryCount={}",
+                sessionId, retryCount);
+            return;
+        }
         try {
             Map<String, String> message = Map.of(
                 AsyncTaskStreamConstants.FIELD_SESSION_ID, sessionId,
@@ -180,24 +272,9 @@ public class EvaluateStreamConsumer extends AbstractStreamConsumer<EvaluateStrea
 
         } catch (Exception e) {
             log.error("重试入队失败: sessionId={}, error={}", sessionId, e.getMessage(), e);
-            updateEvaluateStatus(sessionId, AsyncTaskStatus.FAILED, truncateError("重试入队失败: " + e.getMessage()));
+            sessionRepository.failEvaluationIfProcessing(
+                sessionId, payload.attemptId(), AsyncTaskStatus.PENDING, AsyncTaskStatus.FAILED,
+                truncateError("重试入队失败: " + e.getMessage()), LocalDateTime.now());
         }
     }
-
-    /**
-     * 更新评估状态
-     */
-    private void updateEvaluateStatus(String sessionId, AsyncTaskStatus status, String error) {
-        try {
-            sessionRepository.findBySessionId(sessionId).ifPresent(session -> {
-                session.setEvaluateStatus(status);
-                session.setEvaluateError(error);
-                sessionRepository.save(session);
-                log.debug("评估状态已更新: sessionId={}, status={}", sessionId, status);
-            });
-        } catch (Exception e) {
-            log.error("更新评估状态失败: sessionId={}, status={}, error={}", sessionId, status, e.getMessage(), e);
-        }
-    }
-
 }

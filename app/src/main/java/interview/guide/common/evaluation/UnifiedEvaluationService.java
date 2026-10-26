@@ -34,6 +34,8 @@ public class UnifiedEvaluationService {
 
     private static final Logger log = LoggerFactory.getLogger(UnifiedEvaluationService.class);
     private static final int MAX_REFERENCE_CONTEXT_CHARS = 6000;
+    /** 降级反馈固定文案；evaluate() 靠它判定 degraded，避免给 LLM 输出 schema 加非业务字段 */
+    private static final String DEGRADED_FEEDBACK = "模型评估失败后的系统降级，该分数不代表真实表现。";
 
     private final PromptTemplate systemPromptTemplate;
     private final PromptTemplate userPromptTemplate;
@@ -112,7 +114,7 @@ public class UnifiedEvaluationService {
                                      String sessionId,
                                      List<QaRecord> qaRecords,
                                      String resumeText) {
-        return evaluate(chatClient, sessionId, qaRecords, resumeText, null);
+        return evaluate(chatClient, sessionId, qaRecords, resumeText, null, null);
     }
 
     public EvaluationReport evaluate(ChatClient chatClient,
@@ -120,6 +122,18 @@ public class UnifiedEvaluationService {
                                      List<QaRecord> qaRecords,
                                      String resumeText,
                                      String referenceContext) {
+        return evaluate(chatClient, sessionId, qaRecords, resumeText, referenceContext, null);
+    }
+
+    /**
+     * @param progressHeartbeat 每完成一个批次回调一次，供调用方刷新任务租约（可为 null）
+     */
+    public EvaluationReport evaluate(ChatClient chatClient,
+                                     String sessionId,
+                                     List<QaRecord> qaRecords,
+                                     String resumeText,
+                                     String referenceContext,
+                                     Runnable progressHeartbeat) {
         log.info("开始评估面试: sessionId={}, 共{}题", sessionId, qaRecords.size());
 
         String resumeContext = resumeText != null ? resumeText : "";
@@ -135,7 +149,7 @@ public class UnifiedEvaluationService {
 
         // 分批评估
         List<BatchResult> batchResults = evaluateInBatches(
-            chatClient, sessionId, resumeContext, qaRecords, referenceBaseline
+            chatClient, sessionId, resumeContext, qaRecords, referenceBaseline, progressHeartbeat
         );
 
         // 合并批次结果
@@ -150,8 +164,12 @@ public class UnifiedEvaluationService {
             mergedEvaluations, fallbackFeedback, fallbackStrengths, fallbackImprovements
         );
 
+        // 降级判定：任一批次落入 degradedReport，就认为报告含未经模型评分的题目
+        boolean degraded = mergedEvaluations.stream()
+            .anyMatch(evaluation -> DEGRADED_FEEDBACK.equals(evaluation.feedback()));
+
         return buildReport(sessionId, qaRecords, mergedEvaluations,
-            summary.overallFeedback(), summary.strengths(), summary.improvements());
+            summary.overallFeedback(), summary.strengths(), summary.improvements(), degraded);
     }
 
     private String loadPrompt(String path) throws IOException {
@@ -161,7 +179,7 @@ public class UnifiedEvaluationService {
 
     private List<BatchResult> evaluateInBatches(ChatClient chatClient, String sessionId,
                                                  String resumeContext, List<QaRecord> qaRecords,
-                                                 String referenceContext) {
+                                                 String referenceContext, Runnable progressHeartbeat) {
         List<BatchResult> results = new ArrayList<>();
         int[] extraBudget = {fallbackMaxExtraCalls};
         for (List<QaGroup> batchGroups : packBatches(buildGroups(qaRecords))) {
@@ -175,6 +193,9 @@ public class UnifiedEvaluationService {
             }
             results.add(new BatchResult(
                 flattened.stream().map(QaRecord::questionIndex).toList(), report));
+            if (progressHeartbeat != null) {
+                progressHeartbeat.run();
+            }
         }
         return results;
     }
@@ -246,8 +267,7 @@ public class UnifiedEvaluationService {
      */
     private BatchReportDTO degradedReport(List<Integer> indexes) {
         List<QuestionEvalDTO> evaluations = indexes.stream()
-            .map(index -> new QuestionEvalDTO(index, 0,
-                "模型评估失败后的系统降级，该分数不代表真实表现。", "", List.of()))
+            .map(index -> new QuestionEvalDTO(index, 0, DEGRADED_FEEDBACK, "", List.of()))
             .toList();
         return new BatchReportDTO(0, "模型评估失败后的系统降级。", List.of(), List.of(), evaluations);
     }
@@ -479,7 +499,8 @@ public class UnifiedEvaluationService {
     private EvaluationReport buildReport(String sessionId, List<QaRecord> qaRecords,
                                           List<QuestionEvalDTO> evaluations,
                                           String overallFeedback,
-                                          List<String> strengths, List<String> improvements) {
+                                          List<String> strengths, List<String> improvements,
+                                          boolean degraded) {
         List<QuestionEvaluation> questionDetails = new ArrayList<>();
         List<ReferenceAnswer> referenceAnswers = new ArrayList<>();
         Map<String, List<Integer>> categoryScoresMap = new HashMap<>();
@@ -528,7 +549,8 @@ public class UnifiedEvaluationService {
             overallFeedback,
             strengths != null ? strengths : List.of(),
             improvements != null ? improvements : List.of(),
-            referenceAnswers
+            referenceAnswers,
+            degraded
         );
     }
 

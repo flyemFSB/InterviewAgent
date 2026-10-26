@@ -115,6 +115,15 @@ public final class AsyncTaskStreamConstants {
      */
     public static final String FIELD_SESSION_ID = "sessionId";
 
+    /**
+     * 评估租约时长：必须小于 {@link #PENDING_IDLE_TIMEOUT_MS}，
+     * 否则消息被重投时租约还没过期，重投那边领取失败只能 ACK 丢弃。
+     */
+    public static final long INTERVIEW_EVALUATE_LEASE_TIMEOUT_MS = 4 * 60 * 1000;
+
+    /** 评估心跳节流：批次之间的重复续期没有意义 */
+    public static final long INTERVIEW_EVALUATE_HEARTBEAT_THROTTLE_MS = 60 * 1000;
+
     // ========== 语音面试评估 Stream 配置 ==========
 
     /**

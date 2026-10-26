@@ -224,6 +224,7 @@ public class InterviewPersistenceService {
             session.setStrengthsJson(objectMapper.writeValueAsString(report.strengths()));
             session.setImprovementsJson(objectMapper.writeValueAsString(report.improvements()));
             session.setReferenceAnswersJson(objectMapper.writeValueAsString(report.referenceAnswers()));
+            session.setEvaluateDegraded(report.degraded());
             session.setStatus(InterviewSessionEntity.SessionStatus.EVALUATED);
             session.setCompletedAt(LocalDateTime.now());
 

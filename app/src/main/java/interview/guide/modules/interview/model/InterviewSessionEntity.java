@@ -102,6 +102,17 @@ public class InterviewSessionEntity {
     @Column(length = 500)
     private String evaluateError;
 
+    // 评估执行代次：条件领取、心跳、终态写入都匹配该值，避免多实例互相覆盖结果
+    @Column(length = 36)
+    private String evaluateAttemptId;
+
+    // 评估租约的最近心跳时间：超过阈值未续约的任务可被其它消费者接管
+    private LocalDateTime evaluateUpdatedAt;
+
+    // 评估降级标记：报告里有题目未拿到真实评分（模型失败后零分兜底）
+    @Column(nullable = false)
+    private Boolean evaluateDegraded = Boolean.FALSE;
+
     // LLM提供商
     @Column(length = 50)
     private String llmProvider = "dashscope";
@@ -276,6 +287,30 @@ public class InterviewSessionEntity {
 
     public void setEvaluateError(String evaluateError) {
         this.evaluateError = evaluateError;
+    }
+
+    public String getEvaluateAttemptId() {
+        return evaluateAttemptId;
+    }
+
+    public void setEvaluateAttemptId(String evaluateAttemptId) {
+        this.evaluateAttemptId = evaluateAttemptId;
+    }
+
+    public LocalDateTime getEvaluateUpdatedAt() {
+        return evaluateUpdatedAt;
+    }
+
+    public void setEvaluateUpdatedAt(LocalDateTime evaluateUpdatedAt) {
+        this.evaluateUpdatedAt = evaluateUpdatedAt;
+    }
+
+    public Boolean getEvaluateDegraded() {
+        return evaluateDegraded;
+    }
+
+    public void setEvaluateDegraded(Boolean evaluateDegraded) {
+        this.evaluateDegraded = evaluateDegraded;
     }
 
     public String getLlmProvider() {

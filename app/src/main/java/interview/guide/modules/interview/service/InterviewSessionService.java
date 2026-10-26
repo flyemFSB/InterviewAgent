@@ -1,7 +1,6 @@
 package interview.guide.modules.interview.service;
 
 import interview.guide.common.constant.CommonConstants.InterviewDefaults;
-import interview.guide.common.ai.LlmProviderRegistry;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.common.model.AsyncTaskStatus;
@@ -13,7 +12,6 @@ import interview.guide.modules.interview.model.CreateInterviewRequest;
 import interview.guide.modules.interview.model.HistoricalQuestion;
 import interview.guide.modules.interview.model.InterviewAnswerEntity;
 import interview.guide.modules.interview.model.InterviewQuestionDTO;
-import interview.guide.modules.interview.model.InterviewReportDTO;
 import interview.guide.modules.interview.model.InterviewSessionDTO;
 import interview.guide.modules.interview.model.InterviewSessionEntity;
 import interview.guide.modules.interview.model.SubmitAnswerRequest;
@@ -21,7 +19,6 @@ import interview.guide.modules.interview.model.SubmitAnswerResponse;
 import interview.guide.modules.interview.model.InterviewSessionDTO.SessionStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
@@ -47,12 +44,10 @@ public class InterviewSessionService {
     private static final Duration CREATE_RESULT_TTL = Duration.ofDays(1);
 
     private final InterviewQuestionService questionService;
-    private final AnswerEvaluationService evaluationService;
     private final InterviewPersistenceService persistenceService;
     private final InterviewSessionCache sessionCache;
     private final ObjectMapper objectMapper;
     private final EvaluateStreamProducer evaluateStreamProducer;
-    private final LlmProviderRegistry llmProviderRegistry;
     private final RedisService redisService;
 
     /**
@@ -567,48 +562,6 @@ public class InterviewSessionService {
         }
 
         return restoredSession;
-    }
-
-    /**
-     * 生成评估报告
-     */
-    public InterviewReportDTO generateReport(String sessionId) {
-        CachedSession session = getOrRestoreSession(sessionId);
-
-        if (session.getStatus() != SessionStatus.COMPLETED && session.getStatus() != SessionStatus.EVALUATED) {
-            throw new BusinessException(ErrorCode.INTERVIEW_NOT_COMPLETED, "面试尚未完成，无法生成报告");
-        }
-
-        log.info("生成面试报告: {}", sessionId);
-
-        List<InterviewQuestionDTO> questions = session.getQuestions(objectMapper);
-
-        // 获取 LLM 客户端
-        String provider = null;
-        Optional<InterviewSessionEntity> entityOpt = persistenceService.findBySessionId(sessionId);
-        if (entityOpt.isPresent()) {
-            provider = entityOpt.get().getLlmProvider();
-        }
-        ChatClient chatClient = llmProviderRegistry.getChatClientOrDefault(provider);
-
-        InterviewReportDTO report = evaluationService.evaluateInterview(
-            chatClient,
-            sessionId,
-            session.getResumeText(),
-            questions
-        );
-
-        // 更新 Redis 缓存状态
-        sessionCache.updateSessionStatus(sessionId, SessionStatus.EVALUATED);
-
-        // 保存报告到数据库
-        try {
-            persistenceService.saveReport(sessionId, report);
-        } catch (Exception e) {
-            log.warn("保存报告到数据库失败: {}", e.getMessage());
-        }
-
-        return report;
     }
 
     /**

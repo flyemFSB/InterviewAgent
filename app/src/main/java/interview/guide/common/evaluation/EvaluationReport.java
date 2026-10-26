@@ -14,7 +14,9 @@ public record EvaluationReport(
     String overallFeedback,
     List<String> strengths,
     List<String> improvements,
-    List<ReferenceAnswer> referenceAnswers
+    List<ReferenceAnswer> referenceAnswers,
+    // 评估降级标记：任一批次模型失败被零分兜底时为 true，调用方据此区分「真的考砸」与「模型没给出评分」
+    boolean degraded
 ) {
     public record CategoryScore(
         String category,

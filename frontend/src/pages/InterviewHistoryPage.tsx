@@ -72,6 +72,8 @@ interface UnifiedInterviewItem {
   evaluateStatus?: string;
   evaluateError?: string;
   evaluateStatusUpdatedAt?: string;
+  /** 评估降级：报告已生成，但部分题目是模型失败后的零分兜底 */
+  degraded?: boolean;
   overallScore: number | null;
   totalQuestions?: number;
   actualDuration?: number;
@@ -111,6 +113,9 @@ function StatusIcon({ item }: { item: UnifiedInterviewItem }) {
     return <AlertCircle className="w-4 h-4 text-amber-500 dark:text-amber-400"/>;
   }
   if (isEvaluating(item)) return <RefreshCw className="w-4 h-4 text-blue-500 dark:text-blue-400 animate-spin"/>;
+  if (isEvaluateCompleted(item) && item.degraded) {
+    return <AlertCircle className="w-4 h-4 text-amber-500 dark:text-amber-400"/>;
+  }
   if (isEvaluateCompleted(item)) return <CheckCircle className="w-4 h-4 text-green-500 dark:text-green-400"/>;
   if (item.status === 'IN_PROGRESS') return <PlayCircle className="w-4 h-4 text-blue-500 dark:text-blue-400"/>;
   return <Clock className="w-4 h-4 text-yellow-500 dark:text-yellow-400"/>;
@@ -122,7 +127,7 @@ function getStatusText(item: UnifiedInterviewItem): string {
     return getItemEvaluationPresentation(item).label;
   }
   if (isEvaluating(item)) return item.evaluateStatus === 'PROCESSING' ? '评估中' : '等待评估';
-  if (isEvaluateCompleted(item)) return '已完成';
+  if (isEvaluateCompleted(item)) return item.degraded ? '已评完·部分未评分' : '已完成';
   if (item.status === 'IN_PROGRESS') return '进行中';
   if (item.status === 'PAUSED') return '已暂停';
   if (isCompletedStatus(item.status)) return '已提交';
@@ -211,6 +216,7 @@ function itemsEqual(a: UnifiedInterviewItem[], b: UnifiedInterviewItem[]): boole
     if (ai.id !== bi.id || ai.status !== bi.status ||
         ai.evaluateStatus !== bi.evaluateStatus
         || ai.evaluateStatusUpdatedAt !== bi.evaluateStatusUpdatedAt
+        || ai.degraded !== bi.degraded
         || ai.overallScore !== bi.overallScore) return false;
   }
   return true;
@@ -303,6 +309,7 @@ export default function InterviewHistoryPage({
         status: session.status,
         evaluateStatus: session.evaluateStatus ?? undefined,
         evaluateError: session.evaluateError ?? undefined,
+        degraded: session.degraded ?? undefined,
         overallScore: session.overallScore,
         totalQuestions: session.totalQuestions,
         createdAt: session.createdAt,

@@ -37,8 +37,8 @@ public class EvaluateStreamProducer extends AbstractStreamProducer<String> {
      *
      * @param sessionId 面试会话ID
      */
-    public void sendEvaluateTask(String sessionId) {
-        sendTask(sessionId);
+    public boolean sendEvaluateTask(String sessionId) {
+        return sendTask(sessionId);
     }
 
     @Override

@@ -93,7 +93,10 @@ public class InterviewController {
      * 提交答案
      */
     @PostMapping("/api/interview/sessions/{sessionId}/answers")
-    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 200,
+        timeUnit = RateLimit.TimeUnit.SECONDS)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 30, interval = 1,
+        timeUnit = RateLimit.TimeUnit.MINUTES)
     public Result<SubmitAnswerResponse> submitAnswer(
             @PathVariable String sessionId,
             @RequestBody Map<String, Object> body) {
@@ -103,16 +106,6 @@ public class InterviewController {
         SubmitAnswerRequest request = new SubmitAnswerRequest(sessionId, questionIndex, answer);
         SubmitAnswerResponse response = sessionService.submitAnswer(request);
         return Result.success(response);
-    }
-    
-    /**
-     * 生成面试报告
-     */
-    @GetMapping("/api/interview/sessions/{sessionId}/report")
-    public Result<InterviewReportDTO> getReport(@PathVariable String sessionId) {
-        log.info("生成面试报告: {}", sessionId);
-        InterviewReportDTO report = sessionService.generateReport(sessionId);
-        return Result.success(report);
     }
     
     /**
