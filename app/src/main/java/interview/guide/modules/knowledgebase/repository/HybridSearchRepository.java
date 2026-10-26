@@ -56,15 +56,14 @@ public class HybridSearchRepository {
             SELECT id, 1.0 / (%2$d + rank) AS w FROM text_branch
             UNION ALL
             SELECT id, 1.0 / (%2$d + rank) AS w FROM vector_branch
+        ), fused AS (
+            -- 只按 id 聚合：metadata 是 json 类型，没有等值运算符，不能出现在 GROUP BY 里
+            SELECT id, SUM(w) AS score FROM weighted GROUP BY id
         )
-        SELECT vector_store.id,
-               vector_store.content,
-               vector_store.metadata,
-               SUM(weighted.w) AS score
-        FROM weighted
-        JOIN vector_store ON vector_store.id = weighted.id
-        GROUP BY vector_store.id, vector_store.content, vector_store.metadata
-        ORDER BY score DESC
+        SELECT v.id, v.content, v.metadata, f.score
+        FROM fused f
+        JOIN vector_store v ON v.id = f.id
+        ORDER BY f.score DESC
         LIMIT ?
         """;
 
@@ -101,13 +100,23 @@ public class HybridSearchRepository {
         args.add(vectorLiteral);
         args.add(minScore > 0 ? minScore : -1.0);
         addKbArgs(args, knowledgeBaseIds, kbFilter);
+        // 向量分支的 ORDER BY 距离表达式：模板里有 3 个 ?::vector，此前少传一个，导致参数整体错位
+        args.add(vectorLiteral);
         args.add(candidateLimit);
         args.add(topK);
 
         List<Document> documents = jdbcTemplate.query(sql, (rs, rowNum) -> {
             Map<String, Object> metadata = parseMetadata(rs.getString("metadata"));
-            metadata.put("hybrid_score", rs.getDouble("score"));
-            return new Document(rs.getString("id"), rs.getString("content"), metadata);
+            double rrfScore = rs.getDouble("score");
+            metadata.put("hybrid_score", rrfScore);
+            // Document 没有公开的带 score 构造器，直接 new 会让 getScore() 恒为 null，
+            // 下游按分数去重/排序会退化成插入顺序。
+            return Document.builder()
+                .id(rs.getString("id"))
+                .text(rs.getString("content"))
+                .metadata(metadata)
+                .score(rrfScore)
+                .build();
         }, args.toArray());
 
         log.info("ParadeDB 混合检索完成: kbIds={}, topK={}, hits={}", knowledgeBaseIds, topK, documents.size());
