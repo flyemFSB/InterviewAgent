@@ -1,0 +1,11 @@
+# pnpm 11+ 把配置从 .npmrc / package.json#pnpm 统一搬到 pnpm-workspace.yaml，
+# 并且默认拦截依赖的 install/postinstall 脚本（strictDepBuilds 默认 true，
+# 未放行的依赖会让 install 以 ERR_PNPM_IGNORED_BUILDS 失败）。
+# 这里显式放行两个确实需要执行构建脚本的依赖：
+#   - @swc/core：vite-plugin-top-level-await 的编译器，postinstall 链接平台原生二进制
+#   - protobufjs：onnxruntime-web 的传递依赖，postinstall 生成反射元数据
+allowBuilds:
+  '@swc/core': true
+  protobufjs: true
+  # esbuild 是 Vite+ 的传递依赖（optional），其 postinstall 负责链接平台原生二进制
+  esbuild: true

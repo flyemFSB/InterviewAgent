@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    // TS 7 起 types 默认 []，vite.config.ts 用到 process，需要显式带上 node 类型
+    "types": ["node"]
+  },
+  "include": ["vite.config.ts"]
+}

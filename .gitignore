@@ -1,0 +1,27 @@
+# Ignore Maven build output
+target
+/.claude/*
+!/.claude/rules/
+!/.claude/rules/**
+/.idea
+/app/bin
+# Environment variables
+.env
+test-output.txt
+# IDEA code analysis
+qodana.yaml
+
+app/src/main/resources/application-dev.yml
+/docs
+SETUP_API_KEYS.md
+
+# AI Assistant documentation
+CLAUDE.local.md
+GEMINI.md
+
+# Playwright MCP
+.playwright-mcp/
+frontend/test-results/
+frontend/playwright-report/
+/.agents
+skills-lock.json

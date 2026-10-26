@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AI Interview Platform - 根 POM（父 + 聚合）
+  Spring Boot 4.1 / Java 25 / Spring AI 2.0 / PostgreSQL + pgvector / RustFS + Redis
+
+  约定：
+  - 依赖版本只有两个来源：Spring Boot BOM（spring-boot-starter-parent）+ 下面显式 import 的两个 BOM。
+    子模块禁止写 <version>，除非某个库确实不在任何 BOM 里（此时用本文件的 <properties>）。
+  - 仓库地址不写进 POM（可移植）。本地用 ~/.m2/settings.xml 的 mirror，CI 直连 Maven Central。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.0</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.interview</groupId>
+  <artifactId>interview-guide</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>interview-guide</name>
+  <description>AI 智能面试官平台</description>
+
+  <modules>
+    <module>app</module>
+  </modules>
+
+  <properties>
+    <java.version>25</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <spring-ai.version>2.0.0</spring-ai.version>
+    <spring-ai-agent-utils.version>0.10.0</spring-ai-agent-utils.version>
+    <tika.version>2.9.2</tika.version>
+    <redisson.version>4.0.0</redisson.version>
+    <mapstruct.version>1.6.3</mapstruct.version>
+    <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
+    <aws-sdk.version>2.29.51</aws-sdk.version>
+    <itext.version>8.0.5</itext.version>
+    <pinyin4j.version>2.5.0</pinyin4j.version>
+    <springdoc.version>3.0.2</springdoc.version>
+    <dashscope.version>2.22.7</dashscope.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Spring AI 2.0：Boot 4.1 的 BOM 不管理 Spring AI，需自行 import -->
+      <dependency>
+        <groupId>org.springframework.ai</groupId>
+        <artifactId>spring-ai-bom</artifactId>
+        <version>${spring-ai.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.springaicommunity</groupId>
+        <artifactId>spring-ai-agent-utils-bom</artifactId>
+        <version>${spring-ai-agent-utils.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!--
+        依赖仲裁：Maven 是“最近者优先”，Gradle 是“最高版本优先”。
+        下面两条固定住迁移前 Gradle 实际使用的版本，否则会拿到更旧的传递依赖：
+        - jsonschema-module-* 是 5.0.0，generator 却是 4.31.1 时 JsonSchemaGenerator 初始化失败（NoSuchMethodError）
+        - commons-io 2.15.1 缺 ChecksumInputStream（Tika 解析会 NoClassDefFoundError）
+      -->
+      <dependency>
+        <groupId>com.github.victools</groupId>
+        <artifactId>jsonschema-generator</artifactId>
+        <version>5.0.0</version>
+      </dependency>
+      <dependency>
+        <groupId>commons-io</groupId>
+        <artifactId>commons-io</artifactId>
+        <version>2.20.0</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>

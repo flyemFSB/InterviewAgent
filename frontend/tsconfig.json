@@ -1,0 +1,26 @@
+{
+  // TypeScript 7：strict / module=esnext / rootDir / types 都有新默认值，
+  // 这里只保留项目要显式约束的部分，其余交给 7.x 默认。
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    // TS 7 起 types 默认是 []，不再自动包含 node_modules/@types，需要逐个列出：
+    //   - vite-plus/client：Vite+ 的客户端类型（代替 vite/client，项目里没有 node_modules/vite）
+    //   - node：process / NodeJS.Timeout / node:test 等
+    //   - react-syntax-highlighter：其 @types 以 declare module 声明 dist/esm/*，不列就飘成 any
+    "types": ["vite-plus/client", "node", "react-syntax-highlighter"]
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}
